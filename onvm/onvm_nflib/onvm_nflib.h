@@ -297,4 +297,11 @@ onvm_nflib_get_onvm_config(void);
 void
 onvm_nflib_stats_summary_output(uint16_t id);
 
+/**
+ * Writes pkts to container
+ * 
+ */
+void
+write_to_container(const char* writer);
+
 #endif // _ONVM_NFLIB_H_

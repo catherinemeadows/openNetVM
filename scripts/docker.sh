@@ -81,6 +81,7 @@ if [[ "${CMD}" == "" ]] ; then
         --network bridge \
         --volume=/var/run:/var/run \
         --volume="${HUGE}":"${HUGE}" \
+        --volume=/tmp:/tmp \
         --volume="${ONVM}":/openNetVM \
         ${DIR} \
         "${DEVICES[@]}" \
@@ -94,6 +95,7 @@ else
         --hostname="${NAME}" \
         --network bridge \
         --volume=/var/run:/var/run \
+        --volume=/tmp:/tmp \
         --volume="${HUGE}":"${HUGE}" \
         --volume="${ONVM}":/openNetVM \
         ${DIR} \

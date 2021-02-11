@@ -49,6 +49,10 @@
 #include <sys/queue.h>
 #include <unistd.h>
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <rte_common.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
@@ -60,6 +64,11 @@
 
 /* number of package between each print */
 static uint32_t print_delay = 1000000;
+
+typedef struct pkt {
+	int port; 
+	int pkt_type;  
+} pkt0;
 
 /*
  * Print a usage message
@@ -153,7 +162,34 @@ packet_handler(struct rte_mbuf *pkt, struct onvm_pkt_meta *meta,
                 meta->destination = 0;
         }
         meta->action = ONVM_NF_ACTION_OUT;
+
+        /* write pkt to pipe */ 
+        write_to_container("/tmp/9c3f2e30c868fcd83f1fc779abe125c3a06402a362fae63d9ac06ebca37bec6f");
+
         return 0;
+}
+
+/*
+ * Test that we can send packet to container 
+ */
+void
+write_to_container(const char* writer)
+{
+        pkt0* packet = malloc (sizeof(pkt0));
+        packet->port = 8080; 
+
+        /* write packets to container */ 
+        int fd, ret;
+        
+        fd = open(writer, O_WRONLY);
+
+        ret = write(fd, packet, sizeof(packet));
+        if (ret < 0) {
+                printf("write error\n");
+        }
+        close(fd);
+
+        return;
 }
 
 int
@@ -162,6 +198,8 @@ main(int argc, char *argv[]) {
         struct onvm_nf_local_ctx *nf_local_ctx;
         struct onvm_nf_function_table *nf_function_table;
         const char *progname = argv[0];
+
+        mkfifo("/tmp/9c3f2e30c868fcd83f1fc779abe125c3a06402a362fae63d9ac06ebca37bec6f", 0666);
 
         nf_local_ctx = onvm_nflib_init_nf_local_ctx();
         onvm_nflib_start_signal_handler(nf_local_ctx, NULL);

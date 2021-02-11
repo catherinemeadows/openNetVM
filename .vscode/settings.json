@@ -1,0 +1,6 @@
+{
+	"files.associations": {
+		"rte_common.h": "c",
+		"onvm_nflib.h": "c"
+	}
+}
