@@ -72,36 +72,6 @@ fi
 echo "Please ensure the manager is running before starting dockerized NFs"
 
 #shellcheck disable=SC2086
-# if [[ "${CMD}" == "" ]] ; then
-#     sudo docker run \
-#         --interactive --tty \
-#         --privileged \
-#         --name="${NAME}" \
-#         --hostname="${NAME}" \
-#         --network bridge \
-#         --volume=/var/run:/var/run \
-#         --volume="${HUGE}":"${HUGE}" \
-#         --volume="${ONVM}":/openNetVM \
-#         ${DIR} \
-#         "${DEVICES[@]}" \
-#         sdnfv/opennetvm \
-#         /bin/bash
-# else
-#     sudo docker run \
-#         --detach=true \
-#         --privileged \
-#         --name="${NAME}" \
-#         --hostname="${NAME}" \
-#         --network bridge \
-#         --volume=/var/run:/var/run \
-#         --volume="${HUGE}":"${HUGE}" \
-#         --volume="${ONVM}":/openNetVM \
-#         ${DIR} \
-#         "${DEVICES[@]}" \
-#         sdnfv/opennetvm \
-#         /bin/bash -c "${CMD}"
-# fi
-
 if [[ "${CMD}" == "" ]] ; then
     sudo docker run \
         --interactive --tty \
@@ -112,9 +82,9 @@ if [[ "${CMD}" == "" ]] ; then
         --volume=/var/run:/var/run \
         --volume="${HUGE}":"${HUGE}" \
 		--volume=/tmp:/tmp \
-        --volume="${ONVM}":/openNetVM \
-        ${DIR} \
-        "${DEVICES[@]}" \
+        # --volume="${ONVM}":/openNetVM \
+        # ${DIR} \
+        # "${DEVICES[@]}" \
         sdnfv/opennetvm \
         /bin/bash
 else
@@ -127,10 +97,10 @@ else
         --volume=/var/run:/var/run \
 		--volume=/tmp:/tmp \
         --volume="${HUGE}":"${HUGE}" \
-        --volume="${ONVM}":/openNetVM \
-        ${DIR} \
-        "${DEVICES[@]}" \
-        sdnfv/opennetvm \
+        # --volume="${ONVM}":/openNetVM \
+        # ${DIR} \
+        # "${DEVICES[@]}" \
+        # sdnfv/opennetvm \
         /bin/bash -c "${CMD}"
 fi
 
