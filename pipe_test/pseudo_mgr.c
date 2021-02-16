@@ -8,7 +8,7 @@
 typedef struct pkt {
 	int port; 
 	int pkt_type;  
-} pkt; 
+} pkt;
 
 int main()
 {
@@ -18,34 +18,20 @@ int main()
 	packet->pkt_type = 0;
 
 	/* send with mkfifo() */ 
-    int fd, fd2;
-    char * writer = "/tmp/myfifo0";
-    char * reader = "/tmp/myfifo1";
-
+    int fd;
+    char * writer = "/tmp/9c3f2e30c868fcd83f1fc779abe125c3a06402a362fae63d9ac06ebca37bec6f";
 
     /* create the FIFO (named pipe) */
     mkfifo(writer, 0666);
 
     /* send pkt to the FIFO */
     fd = open(writer, O_WRONLY);
-    // write(fd, packet, sizeof(pkt));
-
     while (1) {
         write(fd, packet, sizeof(pkt));
-
-        fd2 = open(reader, O_RDONLY);
-
-        /* get packet */ 
-        read(fd2, packet, sizeof(pkt));
-        printf("Received port: %d\n", packet->port);
-	    printf("Received type: %d\n", packet->pkt_type);
     }
 
-
-    close(fd2);
+    /* cleanup */ 
     close(fd);
-
-    /* remove the FIFO */
     unlink(writer);
 
     return 0;
