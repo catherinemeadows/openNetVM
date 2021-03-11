@@ -105,7 +105,10 @@ num_running_containers() {
         return num;
 }
 
-/* Create rx and tx pipes in /tmp/rx and /tmp/tx */
+/* 
+ * Create rx and tx pipes in /tmp/rx and /tmp/tx 
+ * Return 0 on success, -1 on failure
+ */
 int
 create_pipes(int ref) {
         // rx pipe name
@@ -154,7 +157,9 @@ create_pipes(int ref) {
         return 0;
 }
 
-/* Add ready containers to warm containers stack */
+/* 
+ * Add ready containers to warm containers stack 
+ */
 void
 ready_pipes() {
         int tx_fd, rx_fd;
@@ -220,6 +225,30 @@ ready_pipes() {
                 }
         }
 
+}
+
+/* 
+ * Cleanup fifos and close fds
+ */
+void
+cleanup_pipes() {
+        // cleanup cold pipes
+        struct init_pipe* iterator = head;
+        struct init_pipe* tmp = iterator;
+
+        while (iterator->next != NULL) {
+                tmp = iterator; 
+                remove(iterator->rx_pipe);
+                remove(iterator->tx_pipe);
+                free(tmp);
+
+                iterator = iterator->next;
+        }
+        remove(iterator->rx_pipe);
+        remove(iterator->tx_pipe);
+        free(iterator);
+
+        // 
 }
 
 /* Initialize docker stack to bring the services up */

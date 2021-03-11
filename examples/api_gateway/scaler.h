@@ -74,6 +74,9 @@ create_pipes(int ref);
 void
 ready_pipes(void);
 
+void
+cleanup_pipes(void);
+
 /* list of initialized pipes */
 struct init_pipe {
         int ref;

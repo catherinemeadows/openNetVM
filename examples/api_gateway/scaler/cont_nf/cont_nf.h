@@ -41,6 +41,9 @@ create_pipes(void);
 int
 open_pipes(void);
 
+void
+pipe_cleanup(void);
+
 struct pipe_fds {
     int rx_fd;
     int tx_fd;
