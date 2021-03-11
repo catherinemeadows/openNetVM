@@ -41,11 +41,11 @@
 // warm container ring
 #define WARM_CONTAINER_RING "warm_cont_ring"
 
-// 1024 maximum open file descriptors (stated by linux) / (2 pipes/container)
-#define MAX_CONTAINERS 512
-
 // service name for the docker containers
 #define SERVICE "skeleton"
+
+// stack to hold warm container pipe fds
+struct rte_ring* warm_containers;
 
 int
 num_running_containers(void);
@@ -62,11 +62,12 @@ kill_container_id(char*);
 void
 kill_docker(void);
 
-void*
-scaler(void*);
-
 void
-test_done(void);
+cleanup(void);
+
+/* pipe API to handle tx/rx for containers */
+void
+clean_pipes(void);
 
 int
 create_pipes(int ref);
@@ -75,7 +76,7 @@ void
 ready_pipes(void);
 
 void
-cleanup_pipes(void);
+clean_pipes(void);
 
 /* list of initialized pipes */
 struct init_pipe {

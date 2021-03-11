@@ -67,11 +67,8 @@ int num_initialized = 0;
 // number of containers requested by gw, but not fulfilled by scaler
 int num_requested = 0;
 
-// list head for initialized pipes not ready for communication
-struct init_pipe* head = NULL;
-
-// stack to hold warm container pipe fds
-struct rte_ring* warm_containers;
+// head of cold pipes linked list 
+struct init_pipe* head = NULL; 
 
 // END globals section
 
@@ -231,7 +228,7 @@ ready_pipes() {
  * Cleanup fifos and close fds
  */
 void
-cleanup_pipes() {
+clean_pipes() {
         // cleanup cold pipes
         struct init_pipe* iterator = head;
         struct init_pipe* tmp = iterator;
@@ -306,6 +303,7 @@ scale_docker(int scale) {
         if (WEXITSTATUS(ret) != 0)
                 return -1;
 
+        int notret;
         return 0;
 }
 
@@ -328,7 +326,7 @@ kill_docker() {
 }
 
 /* Send warm container fds to gateway */
-void
+int
 send_containers() {
         // pipe file descriptors in the stack
         void** pipe_fds;
@@ -340,7 +338,7 @@ send_containers() {
 
         if (num_warm == 0 || num_requested == 0) {
                 // nothing to do, no containers to send
-                return;
+                return 0;
         }
 
         if (num_warm <= num_requested) {
@@ -356,37 +354,49 @@ send_containers() {
         ret = rte_ring_dequeue_bulk(warm_containers, pipe_fds, num_to_pop, NULL);
         if (ret == 0) {
                 perror("Could not pop the stack pipes to send\n");
-                return;
+                return -1;
         }
 
-        // now that they're scaled, enqueue to the scale_to_gate
-        if (rte_ring_enqueue(to_gate_ring, pipe_fds) < 0) {
-                perror("Failed to send containers to gateway\n");
-                return;
+        // now that they're scaled, enqueue to the buffer and polling threads
+        if (rte_ring_enqueue(scale_buffer_ring, pipe_fds) < 0 || rte_ring_enqueue(scale_poll_add_ring, pipe_fds) < 0) {
+                perror("Failed to send file descriptors to NFs\n");
+                return -1;
         }
 
         // our number of initialized containers drops after we pop them
         num_initialized -= num_to_pop;
+        return 0;
+}
+
+void
+cleanup() {
+        kill_docker();
+        clean_pipes();
 }
 
 /* scaler runs to maintain warm containers and garbage collect old ones */
-void*
-scaler(void* in) {
+void
+scaler() {
         if (init_stack() == -1) {
                 printf("Failed to start up docker stack\n");
-                return NULL;
+                return;
         }
 
-        while (1) {
-                void* msg;
-                if (rte_ring_dequeue(to_scale_ring, &msg) < 0) {
+        uint16_t new_flows;
+        for (; worker_keep_running;) {
+                /*
+                 * thread-safe put value of containers_to_scale into new_flows
+                 * and reset counter back to 0
+                 */
+                if ((new_flows = rte_atomic16_exchange(&containers_to_scale.cnt, 0)) == 0) {
                         // no new flows yet, just do auto-scaling work
-                        usleep(5);
+                        // maintain a specific number of "warm" containers
+                        usleep(10);
                         continue;
                 }
 
                 // gateway asked us to do something
-                num_requested += *((int*)msg);
+                num_requested += new_flows;
                 int num_to_scale = num_requested - num_initialized;
                 printf("Received %d containers and need to scale up %d\n", num_requested, num_to_scale);
 
@@ -396,12 +406,13 @@ scaler(void* in) {
                 }
 
                 // now that they're scaled, enqueue to the scale_to_gate
-                send_containers();
+                if (send_containers() < 0) {
+                        break;
+                }
 
                 break;
         }
 
         printf("Scaler thread exiting\n");
-        kill_docker();
-        return NULL;
+        cleanup();
 }

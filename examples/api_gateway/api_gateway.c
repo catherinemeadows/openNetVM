@@ -55,6 +55,7 @@
 #include <rte_lpm.h>
 #include <rte_malloc.h>
 #include <rte_mbuf.h>
+#include <rte_mbuf_core.h>
 
 #include "api_gateway.h"
 #include "onvm_flow_table.h"
@@ -85,6 +86,7 @@ parse_app_args(int argc, char *argv[], const char *progname, struct state_info *
                                 break;
                         case 'n':
                                 stats->max_containers = strtoul(optarg, NULL, 10);
+                                break;
                         case 'k':
                                 stats->print_keys = 1;
                                 break;
@@ -119,6 +121,9 @@ print_stats(__attribute__((unused)) struct onvm_nf_local_ctx *nf_local_ctx) {
         struct state_info *stats = (struct state_info *)nf->data;
 
         /* Clear screen and move to top left */
+        /* Clear screen and move to top left */
+        printf("%s%s", clr, topLeft);
+
         printf("\nStatistics ====================================");
         int i;
         for (i = 0; i < stats->max_containers; i++) {
@@ -153,17 +158,18 @@ packet_handler(struct rte_mbuf *pkt, struct onvm_pkt_meta *meta,
                 print_stats(nf_local_ctx);
                 counter = 0;
         }
-        uint16_t dst;
+        int16_t dst;
 
         dst = get_ipv4_dst(pkt);
 
-        // This is a new flow should call the scale API here. Once container is ready add flow to table.
-        if (dst == -1) {
+        if (dst == 0) {
+                // new IP flow, buffer packet while we wait for a container
                 scaling_buf->buffer[scaling_buf->count++] = pkt;
                 if (scaling_buf->count == PACKET_READ_SIZE) {
-                        if (rte_ring_enqueue_bulk(scale_buffer_ring, (void **)scaling_buf->buffer, PACKET_READ_SIZE,
+                        if (rte_ring_enqueue_bulk(gate_buffer_ring, (void **)scaling_buf->buffer, PACKET_READ_SIZE,
                                                   NULL) == 0) {
                                 for (int i = 0; i < PACKET_READ_SIZE; i++) {
+                                        perror("Failed to buffer packet data from gateway on ring\n");
                                         rte_pktmbuf_free(scaling_buf->buffer[i]);
                                 }
                                 return 0;
@@ -171,12 +177,67 @@ packet_handler(struct rte_mbuf *pkt, struct onvm_pkt_meta *meta,
                                 scaling_buf->count = 0;
                         }
                 }
+
+                // tell scaler we need another container
+                rte_atomic16_inc(&containers_to_scale);
+        } else {
+                // use pipe API to send packet to container through its' RX pipe fd
         }
 
         meta->destination = dst;
         stats->statistics[dst]++;
         meta->action = ONVM_NF_ACTION_TONF;
         return 0;
+}
+
+int
+start_child(const char *tag) {
+        struct onvm_nf_local_ctx *child_local_ctx;
+        struct onvm_nf_init_cfg *child_init_cfg;
+        child_init_cfg = onvm_nflib_init_nf_init_cfg(tag);
+
+        /* Prepare init data for the child */
+        // make service ID something to denote we are not taking packets
+        child_init_cfg->service_id = 5;
+
+        child_local_ctx = onvm_nflib_init_nf_local_ctx();
+
+        if (onvm_nflib_start_nf(child_local_ctx, child_init_cfg) < 0) {
+                printf("Failed to spawn child NF\n");
+                return -1;
+        }
+
+        return 0;
+}
+
+void *
+start_scaler(void *arg __attribute__((unused))) {
+        if (start_child("scaler") < 0) {
+                // failed
+                return NULL;
+        }
+        scaler();
+        return NULL;
+}
+
+void *
+start_buffer(void *arg __attribute__((unused))) {
+        if (start_child("buffer") < 0) {
+                // failed
+                return NULL;
+        }
+        buffer();
+        return NULL;
+}
+
+void *
+start_polling(void *arg __attribute__((unused))) {
+        if (start_child("polling") < 0) {
+                // failed
+                return NULL;
+        }
+        polling();
+        return NULL;
 }
 
 void
@@ -190,59 +251,54 @@ nf_setup(struct onvm_nf_local_ctx *nf_local_ctx) {
         }
 
         printf("Hash table successfully created. \n");
-        init_cont_nf(stats);
-
-        pthread_t tid;
-        // scaler acts as container initializer and garbage collector
-        pthread_create(&tid, NULL, scaler, NULL);
 
         init_rings();
 
+        pthread_t scale_thd;
+        // scaler acts as container initializer and garbage collector
+        pthread_create(&scale_thd, NULL, start_scaler, NULL);
+
         pthread_t buf_thd;
         // buffer acts as the gateway's dispatcher of new flows -> container pipes
-        pthread_create(&buf_thd, NULL, buffer, NULL);
+        pthread_create(&buf_thd, NULL, start_buffer, NULL);
+
+        pthread_t poll_thd;
+        // polling acts as tx thread that gets all container packets out through network
+        pthread_create(&poll_thd, NULL, start_polling, NULL);
+
+        RTE_LOG(INFO, APP, "Spawned scale, buffer, and poll child NFs\n");
+
+        // set up polling mbuf buffer
+        pktmbuf_pool = rte_mempool_lookup(PKTMBUF_POOL_NAME);
+        if (pktmbuf_pool == NULL) {
+                onvm_nflib_stop(nf_local_ctx);
+                rte_exit(EXIT_FAILURE, "Cannot find mbuf pool!\n");
+        }
 
         // for testing - how many containers do we want to ask scaler for
-        int request_containers = 5;
-        if (rte_ring_enqueue(to_scale_ring, &request_containers) < 0) {
-                printf("Failed to send message - message discarded\n");
-        }
+        rte_atomic16_inc(&containers_to_scale);
+        rte_atomic16_inc(&containers_to_scale);
+        rte_atomic16_inc(&containers_to_scale);
 }
 
 void
-init_cont_nf(struct state_info *stats) {
-        if (stats->max_containers <= 0) {
-                stats->max_containers = 4;
-        }
-        uint8_t max_nfs = stats->max_containers;
-        /* set up array for NF tx data */
-        mz_cont_nf = rte_memzone_reserve("container nf array", sizeof(*cont_nfs) * max_nfs, rte_socket_id(), 0);
-        if (mz_cont_nf == NULL)
-                rte_exit(EXIT_FAILURE, "Cannot reserve memory zone for nf information\n");
-        memset(mz_cont_nf->addr, 0, sizeof(*cont_nfs) * max_nfs);
-        cont_nfs = mz_cont_nf->addr;
+sig_handler(int sig) {
+        if (sig != SIGINT && sig != SIGTERM)
+                return;
 
-        printf("Number of containers to be created: %d\n", stats->max_containers);
-        for (int i = 0; i < stats->max_containers; i++) {
-                struct container_nf *nf;
-                nf = &cont_nfs[i];
-                nf->instance_id = i + MAX_NFS;
-                nf->service_id = i + MAX_NFS;
-        }
+        /* Will stop the processing for all spawned threads in advanced rings mode */
+        worker_keep_running = 0;
 }
 
 void
-init_rings() {
+init_rings(void) {
         const unsigned flags = 0;
         const unsigned ring_size = 64;
 
-        to_scale_ring = rte_ring_create(_GATE_2_SCALE, ring_size, rte_socket_id(), flags);
-        to_gate_ring = rte_ring_create(_SCALE_2_GATE, ring_size, rte_socket_id(), flags);
-        scale_buffer_ring = rte_ring_create(_SCALE_BUFFER, NF_QUEUE_RINGSIZE, rte_socket_id(), RING_F_SP_ENQ);
-        if (to_scale_ring == NULL)
-                rte_exit(EXIT_FAILURE, "Problem getting sending ring\n");
-        if (to_gate_ring == NULL)
+        gate_buffer_ring = rte_ring_create(_GATE_2_BUFFER, ring_size, rte_socket_id(), flags);
+        if (gate_buffer_ring == NULL)
                 rte_exit(EXIT_FAILURE, "Problem getting receiving ring\n");
+        scale_buffer_ring = rte_ring_create(_SCALE_2_BUFFER, NF_QUEUE_RINGSIZE, rte_socket_id(), RING_F_SP_ENQ);
         if (scale_buffer_ring == NULL)
                 rte_exit(EXIT_FAILURE, "Problem getting buffer ring for scaling.\n");
 }
@@ -250,12 +306,18 @@ init_rings() {
 int
 main(int argc, char *argv[]) {
         int arg_offset;
-        struct onvm_nf_local_ctx *nf_local_ctx;
         struct onvm_nf_function_table *nf_function_table;
         const char *progname = argv[0];
 
         nf_local_ctx = onvm_nflib_init_nf_local_ctx();
-        onvm_nflib_start_signal_handler(nf_local_ctx, NULL);
+
+        // thread-safe counter shared with scaler
+        rte_atomic16_init(&containers_to_scale);
+        rte_atomic16_set(&containers_to_scale, 0);
+
+        // set up signals for the threads to exit
+        worker_keep_running = 1;
+        onvm_nflib_start_signal_handler(nf_local_ctx, sig_handler);
 
         nf_function_table = onvm_nflib_init_nf_function_table();
         nf_function_table->pkt_handler = &packet_handler;

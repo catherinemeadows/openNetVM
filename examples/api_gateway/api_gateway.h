@@ -38,17 +38,28 @@
  * api_gateway.h - This application performs L3 forwarding.
  ********************************************************************/
 
+#include "onvm_common.h"
 #include "onvm_flow_table.h"
 #include "onvm_pkt_common.h"
 
 #define NUM_CONTAINERS 4
-#define CONT_NF_RXQ_NAME "Cont_Client_%u_RX"
-#define CONT_NF_TXQ_NAME "Cont_Client_%u_TX"
 #define CONT_RX_PIPE_NAME "/tmp/rx/%d"
 #define CONT_TX_PIPE_NAME "/tmp/tx/%d"
+#define PKTMBUF_POOL_NAME "MProc_pktmbuf_pool"
+#define _GATE_2_BUFFER "GATEWAY_2_BUFFER"
+#define _SCALE_2_BUFFER "SCALE_2_BUFFER"
+
+// 1024 maximum open file descriptors (stated by linux) / (2 pipes/container)
+#define MAX_CONTAINERS 512
 
 /* This defines the maximum possible number entries in out flow table. */
 #define HASH_ENTRIES 100  /// TODO: Possibly move this over to state struct.
+
+// How many milliseconds should we set for epoll_wait in the polling thread
+#define POLLING_TIMEOUT 500
+
+/* Handle signals and shutdowns between threads */
+static uint8_t worker_keep_running;
 
 struct onvm_ft *em_tbl;
 
@@ -56,11 +67,23 @@ struct container_nf *cont_nfs;
 
 const struct rte_memzone *mz_cont_nf;
 
-static const char *_GATE_2_SCALE = "GATEWAY_2_SCALER";
-static const char *_SCALE_2_GATE = "SCALER_2_GATEWAY";
-static const char *_SCALE_BUFFER = "SCALING_BUFFER";
-struct rte_ring *to_scale_ring, *to_gate_ring, *scale_buffer_ring;
-struct packet_buf *scaling_buf;
+struct rte_mempool *pktmbuf_pool;
+
+struct queue_mgr *poll_tx_mgr;
+
+/* Each new flow is a new container to scale, gateway increments, scaler satisfies request */
+rte_atomic16_t containers_to_scale;
+
+// buffer pulls from gateway and scaler ring buffers
+
+// ring to add and delete TX pipes from the polling thread
+// static const char *_SCALE_2_POLL_ADD = "SCALE_2_POLL_ADD";
+// static const char *_SCALE_2_POLL_DEL = "SCALE_2_POLL_DEL";
+
+struct rte_ring *scale_buffer_ring, *gate_buffer_ring, *scale_poll_add_ring, *scale_poll_del_ring;
+struct packet_buf *scaling_buf, *pkts_deq_burst, *pkts_enq_burst;
+
+struct onvm_nf_local_ctx *nf_local_ctx;
 
 /*Struct that holds all NF state information */
 struct state_info {
@@ -72,12 +95,6 @@ struct state_info {
         uint8_t max_containers;
 };
 
-struct container_nf {
-        struct rte_ring *rx_q;
-        struct rte_ring *tx_q;
-        uint16_t instance_id;
-        uint16_t service_id;
-};
 /* Function pointers for LPM or EM functionality. */
 
 int
@@ -87,10 +104,47 @@ uint16_t
 get_ipv4_dst(struct rte_mbuf *pkt);
 
 void
-init_cont_nf(struct state_info *stats);
+nf_setup(struct onvm_nf_local_ctx *nf_local_ctx);
+
+/* functions to start up threads as child NFs */
+int
+start_child(const char *tag);
 
 void *
-buffer(void *in);
+start_scaler(void *arg);
+
+void
+scaler(void);
+
+void *
+start_buffer(void *arg);
+
+void
+buffer(void);
+
+void *
+start_polling(void *arg);
+
+void
+polling(void);
+
+// Helpers
 
 void
 init_rings(void);
+
+void
+sig_handler(int sig);
+
+struct queue_mgr *
+create_tx_poll_mgr(void);
+
+void
+enqueue_mbuf(struct rte_mbuf *pkt);
+
+// Pipe read/write helpers
+struct rte_mbuf *
+read_pipe(int fd);
+
+int
+write_pipe(int fd, struct rte_mbuf *packet);
