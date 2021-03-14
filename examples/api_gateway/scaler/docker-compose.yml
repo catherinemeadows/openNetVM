@@ -4,7 +4,7 @@ services:
   skeleton:
     image: "cont_nf_test:latest"
     volumes:
-      - /tmp/rx/{{.Task.Slot}}:/rx_pipe
-      - /tmp/tx/{{.Task.Slot}}:/tx_pipe
+      - /tmp/rx/{{.Task.Slot}}:/tx_pipe
+      - /tmp/tx/{{.Task.Slot}}:/rx_pipe
     working_dir: /container
     command: ./build/app/cont_nf

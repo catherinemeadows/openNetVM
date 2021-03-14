@@ -8,36 +8,6 @@ const int pkt_size = sizeof(struct rte_mbuf*);
 int tx_fd;
 int rx_fd;
 
-/*
- * Create rx and tx pipes
- * Return 0 on success, -1 on failure
- */
-// int
-// create_pipes() {
-//         // remove any old pipes with same name
-//         remove(CONT_RX_PIPE_NAME);
-//         remove(CONT_TX_PIPE_NAME);
-
-//         // create rx pipe
-//         if (mkfifo(CONT_RX_PIPE_NAME, 0666) == -1) {
-//                 perror("mkfifo");
-//                 return -1;
-//         }
-
-//         // create tx pipe
-//         if (mkfifo(CONT_TX_PIPE_NAME, 0666) == -1) {
-//                 perror("mkfifo");
-//                 return -1;
-//         }
-
-//         // init fds to -1
-//         warm_pipes = malloc(sizeof(struct pipe_fds));
-//         warm_pipes->rx_fd = -1;
-//         warm_pipes->tx_fd = -1;
-
-//         return 0;
-// }
-
 int
 open_pipes() {
         if (rx_fd = open(CONT_RX_PIPE_NAME, O_RDONLY | O_NONBLOCK) == -1) {
@@ -85,7 +55,6 @@ write_packet(struct rte_mbuf* packet) {
  */
 void
 receive_packets() {
-        /* put in loop or however we want to set this up */
         struct rte_mbuf* packet = read_packet();
         if (packet == NULL) {
                 perror("Couldn't read packet data\n");
@@ -103,12 +72,6 @@ receive_packets() {
 int
 main(void) {
         int ret = -1;
-
-        /* create pipes */
-        // if (create_pipes() == -1) {
-        //         pipe_cleanup();
-        //         exit(0);
-        // }
 
         /* open pipes */
         printf("Starting to open pipes\n");
