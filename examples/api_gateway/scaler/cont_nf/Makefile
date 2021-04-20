@@ -36,14 +36,17 @@
 
 CONT_DIR=$(HOME)/openNetVM/examples/api_gateway/scaler/cont_nf
 LWIP_DIR=$(CONT_DIR)/lwip-cont_nf-build/Debug
+AXTLS_DIR=$(HOME)/openNetVM/examples/api_gateway/scaler/cont_nf/axTLS
 APP=cont_nf
 
-# run make inside lwip directory
+# run make inside lwip directory and axtls directory
 all:
 	cd $(LWIP_DIR) && make && mv $(APP) $(CONT_DIR)
+	cd $(AXTLS_DIR) && make
 
 .PHONY: clean
 
 clean:
 	rm -f $(APP)
 	cd $(LWIP_DIR) && make clean
+	cd $(AXTLS_DIR) && make clean
